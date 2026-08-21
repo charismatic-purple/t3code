@@ -1,4 +1,26 @@
-# Customize a project icon
+# Manage project settings
+
+Open **Settings**, select **Projects**, then select a project. Settings that belong to files on disk
+apply to the checkout selected on that page. When the checkout belongs to a remote environment, T3
+Code reads and writes the files on that environment.
+
+## Project instructions
+
+Under **Project instructions**, create or edit Codex `AGENTS.md` and `AGENTS.override.md` files.
+Nested instruction files appear with their project-relative paths so you can see which directory
+scope they belong to. New instructions are created as `AGENTS.md` at the project root.
+
+## Project skills
+
+Under **Project skills**, create or edit repository skills. New skills are stored at
+`.agents/skills/<skill-name>/SKILL.md` and can be committed with the rest of the repository. Skill
+names use lowercase letters, numbers, and hyphens. T3 Code validates the required `name` and
+`description` frontmatter before saving.
+
+T3 Code prevents a save when the file changed after you opened it, and it will not overwrite files
+that are too large to load completely. Reopen a changed file before applying your edits again.
+
+## Project icon
 
 T3 Code selects a project icon automatically. It checks `t3.json`, common favicon and app icon
 paths, and icon links in project HTML files.

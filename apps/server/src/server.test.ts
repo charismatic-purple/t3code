@@ -4739,7 +4739,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
-  it.effect("routes websocket rpc projects.listEntries and projects.readFile", () =>
+  it.effect("routes websocket rpc project file reads and agent configuration discovery", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -4749,6 +4749,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         path.join(workspaceDir, "src", "index.ts"),
         "export const answer = 42;\n",
       );
+      yield* fs.writeFileString(path.join(workspaceDir, "AGENTS.md"), "# Instructions\n");
 
       yield* buildAppUnderTest();
 
@@ -4757,6 +4758,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) =>
           Effect.all({
             listing: client[WS_METHODS.projectsListEntries]({ cwd: workspaceDir }),
+            agentConfig: client[WS_METHODS.projectsListAgentConfig]({ cwd: workspaceDir }),
             file: client[WS_METHODS.projectsReadFile]({
               cwd: workspaceDir,
               relativePath: "src/index.ts",
@@ -4766,12 +4768,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.isTrue(response.listing.entries.some((entry) => entry.path === "src/index.ts"));
-      assert.deepEqual(response.file, {
+      assert.deepInclude(response.file, {
         relativePath: "src/index.ts",
         contents: "export const answer = 42;\n",
         byteLength: 26,
         truncated: false,
       });
+      assert.match(response.file.revision, /^[a-f0-9]{64}$/);
+      assert.deepEqual(response.agentConfig.instructionPaths, ["AGENTS.md"]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 

@@ -1,6 +1,7 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
+  ProjectAgentConfigListResult,
   ProjectListEntriesResult,
   ProjectReadFileResult,
 } from "@t3tools/contracts";
@@ -33,6 +34,10 @@ export function getProjectEntriesQueryAtom(environmentId: EnvironmentId, cwd: st
   return projectEnvironment.listEntries({ environmentId, input: { cwd } });
 }
 
+export function getProjectAgentConfigQueryAtom(environmentId: EnvironmentId, cwd: string) {
+  return projectEnvironment.listAgentConfig({ environmentId, input: { cwd } });
+}
+
 export function getProjectFileQueryAtom(
   environmentId: EnvironmentId,
   cwd: string,
@@ -49,14 +54,18 @@ export function setProjectFileQueryData(
   cwd: string,
   relativePath: string,
   contents: string,
+  revision?: string,
 ): void {
-  appAtomRegistry.set(optimisticFileAtom(environmentId, cwd, relativePath), {
+  const atom = optimisticFileAtom(environmentId, cwd, relativePath);
+  const currentRevision = appAtomRegistry.get(atom)?.data.revision;
+  appAtomRegistry.set(atom, {
     confirmedAgainst: undefined,
     data: {
       relativePath,
       contents,
       byteLength: new TextEncoder().encode(contents).byteLength,
       truncated: false,
+      revision: revision ?? currentRevision ?? "0".repeat(64),
     },
   });
 }
@@ -126,6 +135,22 @@ export function useProjectEntriesQuery(
   cwd: string,
 ): ProjectQueryState<ProjectListEntriesResult> {
   const atom = getProjectEntriesQueryAtom(environmentId, cwd);
+  const result = useAtomValue(atom);
+  const refreshAtom = useAtomRefresh(atom);
+  const refresh = useCallback(() => refreshAtom(), [refreshAtom]);
+  return {
+    data: Option.getOrNull(AsyncResult.value(result)),
+    error: errorMessage(result),
+    isPending: result.waiting,
+    refresh,
+  };
+}
+
+export function useProjectAgentConfigQuery(
+  environmentId: EnvironmentId,
+  cwd: string,
+): ProjectQueryState<ProjectAgentConfigListResult> {
+  const atom = getProjectAgentConfigQueryAtom(environmentId, cwd);
   const result = useAtomValue(atom);
   const refreshAtom = useAtomRefresh(atom);
   const refresh = useCallback(() => refreshAtom(), [refreshAtom]);

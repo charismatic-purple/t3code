@@ -11,6 +11,7 @@ import {
 } from "./projectFilesQueryState";
 
 const environmentId = EnvironmentId.make("environment-project-files-query-test");
+const revision = "0".repeat(64);
 
 describe("project files queries", () => {
   afterEach(() => {
@@ -25,6 +26,7 @@ describe("project files queries", () => {
       contents: '{"nodeVersion":"20"}',
       byteLength: 20,
       truncated: false,
+      revision,
     } satisfies ProjectReadFileResult;
     setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}');
     setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}');
@@ -42,6 +44,7 @@ describe("project files queries", () => {
       contents: '{"nodeVersion":"22"}',
       byteLength: 20,
       truncated: false,
+      revision,
     });
 
     expect(

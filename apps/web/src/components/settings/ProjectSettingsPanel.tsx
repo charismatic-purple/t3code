@@ -109,6 +109,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { ProjectFaviconPickerDialog } from "./ProjectFaviconPickerDialog";
+import { ProjectAgentSettings } from "./ProjectAgentSettings";
 
 export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
@@ -1130,6 +1131,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             />
           ) : null}
         </SettingsSection>
+
+        <ProjectAgentSettings
+          key={selectedCheckout.physicalProjectKey}
+          checkout={selectedCheckout}
+        />
 
         <SettingsSection title="Danger">
           <SettingsRow

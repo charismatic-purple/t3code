@@ -32,6 +32,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   type ProjectId,
+  ProjectAgentConfigListError,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -253,6 +254,8 @@ function projectFileFailureContext(
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    case "WorkspaceFileConflictError":
+      return { failure: "write_conflict" };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -1818,6 +1821,21 @@ const makeWsRpcLayer = (
                   new ProjectListEntriesError({
                     ...input,
                     ...projectEntriesFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsListAgentConfig]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsListAgentConfig,
+            workspaceFileSystem.listAgentConfig(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectAgentConfigListError({
+                    cwd: input.cwd,
+                    message: cause.message,
                     cause,
                   }),
               ),

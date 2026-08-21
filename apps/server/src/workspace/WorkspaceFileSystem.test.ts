@@ -52,6 +52,34 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 });
 
 it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (it) => {
+  describe("listAgentConfig", () => {
+    it.effect("discovers ignored and nested agent configuration without the workspace index", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "AGENTS.override.md", "# Root override\n");
+        yield* writeTextFile(cwd, "ignored/AGENTS.md", "# Ignored scope\n");
+        yield* writeTextFile(cwd, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n");
+        yield* writeTextFile(
+          cwd,
+          "packages/api/.agents/skills/review/SKILL.md",
+          "---\nname: review\n---\n",
+        );
+        yield* writeTextFile(cwd, "node_modules/dependency/AGENTS.md", "# Dependency\n");
+
+        const result = yield* workspaceFileSystem.listAgentConfig({ cwd });
+
+        expect(result).toEqual({
+          instructionPaths: ["AGENTS.override.md", "ignored/AGENTS.md"],
+          skills: [
+            { name: "review", path: ".agents/skills/review/SKILL.md" },
+            { name: "review", path: "packages/api/.agents/skills/review/SKILL.md" },
+          ],
+        });
+      }),
+    );
+  });
+
   describe("readFile", () => {
     it.effect("reads UTF-8 files relative to the workspace root", () =>
       Effect.gen(function* () {
@@ -64,12 +92,29 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           relativePath: "src/index.ts",
         });
 
-        expect(result).toEqual({
+        expect(result).toMatchObject({
           relativePath: "src/index.ts",
           contents: "export const answer = 42;\n",
           byteLength: 26,
           truncated: false,
         });
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
+      }),
+    );
+
+    it.effect("returns a full-content revision when the editable preview is truncated", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const contents = `${"a".repeat(1024 * 1024)}tail`;
+        yield* writeTextFile(cwd, "AGENTS.md", contents);
+
+        const result = yield* workspaceFileSystem.readFile({ cwd, relativePath: "AGENTS.md" });
+
+        expect(result.truncated).toBe(true);
+        expect(result.contents).toHaveLength(1024 * 1024);
+        expect(result.byteLength).toBe(contents.length);
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
       }),
     );
 
@@ -207,8 +252,57 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           .readFileString(path.join(cwd, "plans/effect-rpc.md"))
           .pipe(Effect.orDie);
 
-        expect(result).toEqual({ relativePath: "plans/effect-rpc.md" });
+        expect(result).toMatchObject({ relativePath: "plans/effect-rpc.md" });
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
         expect(saved).toBe("# Plan\n");
+      }),
+    );
+
+    it.effect("rejects create-only writes when the destination already exists", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "AGENTS.md", "original\n");
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "AGENTS.md",
+            contents: "replacement\n",
+            expectedRevision: null,
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFileConflictError);
+        expect(yield* fileSystem.readFileString(path.join(cwd, "AGENTS.md"))).toBe("original\n");
+      }),
+    );
+
+    it.effect("rejects updates when the file changed after it was read", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "AGENTS.md", "first\n");
+        const opened = yield* workspaceFileSystem.readFile({ cwd, relativePath: "AGENTS.md" });
+        yield* writeTextFile(cwd, "AGENTS.md", "changed elsewhere\n");
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "AGENTS.md",
+            contents: "editor contents\n",
+            expectedRevision: opened.revision,
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFileConflictError);
+        expect(yield* fileSystem.readFileString(path.join(cwd, "AGENTS.md"))).toBe(
+          "changed elsewhere\n",
+        );
       }),
     );
 

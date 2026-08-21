@@ -10,6 +10,7 @@ const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
+const PROJECT_FILE_REVISION_PATTERN = /^[a-f0-9]{64}$/;
 
 export const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export type ProjectEntryKind = typeof ProjectEntryKind.Type;
@@ -80,6 +81,32 @@ export const ProjectListEntriesResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
+
+export const ProjectAgentConfigListInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectAgentConfigListInput = typeof ProjectAgentConfigListInput.Type;
+
+export const ProjectAgentSkillFile = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+});
+export type ProjectAgentSkillFile = typeof ProjectAgentSkillFile.Type;
+
+export const ProjectAgentConfigListResult = Schema.Struct({
+  instructionPaths: Schema.Array(TrimmedNonEmptyString),
+  skills: Schema.Array(ProjectAgentSkillFile),
+});
+export type ProjectAgentConfigListResult = typeof ProjectAgentConfigListResult.Type;
+
+export class ProjectAgentConfigListError extends Schema.TaggedErrorClass<ProjectAgentConfigListError>()(
+  "ProjectAgentConfigListError",
+  {
+    cwd: Schema.optional(TrimmedNonEmptyString),
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export const ProjectEntriesFailure = Schema.Literals([
   "workspace_root_not_found",
@@ -202,6 +229,7 @@ export const ProjectReadFileResult = Schema.Struct({
   contents: Schema.String,
   byteLength: NonNegativeInt,
   truncated: Schema.Boolean,
+  revision: Schema.String.check(Schema.isPattern(PROJECT_FILE_REVISION_PATTERN)),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
@@ -211,6 +239,7 @@ export const ProjectFileFailure = Schema.Literals([
   "path_not_file",
   "binary_file",
   "operation_failed",
+  "write_conflict",
 ]);
 export type ProjectFileFailure = typeof ProjectFileFailure.Type;
 
@@ -266,11 +295,15 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  expectedRevision: Schema.optional(
+    Schema.NullOr(Schema.String.check(Schema.isPattern(PROJECT_FILE_REVISION_PATTERN))),
+  ),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
+  revision: Schema.String.check(Schema.isPattern(PROJECT_FILE_REVISION_PATTERN)),
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
@@ -294,7 +327,9 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
       ...props,
       message:
         decodedProjectErrorMessage(props) ??
-        `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`,
+        (props.failure === "write_conflict"
+          ? `Workspace file '${props.relativePath}' already exists or changed after it was opened. Reopen it before saving.`
+          : `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`),
     } as any);
   }
 }
