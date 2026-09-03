@@ -141,8 +141,11 @@ async function stopApp() {
     };
 
     app.once("exit", finish);
-    app.kill("SIGTERM");
+    // Stop descendants before the Electron main process. If the parent exits
+    // first, its backend is immediately reparented and `pkill -P` can no longer
+    // find it, leaving the dev port occupied across hot reloads and later runs.
     killChildTreeByPid(app.pid, "TERM");
+    app.kill("SIGTERM");
     cleanupStaleDevApps();
 
     setTimeout(() => {
@@ -150,8 +153,8 @@ async function stopApp() {
         return;
       }
 
-      app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
+      app.kill("SIGKILL");
       cleanupStaleDevApps();
       finish();
     }, forcedShutdownTimeoutMs).unref();
