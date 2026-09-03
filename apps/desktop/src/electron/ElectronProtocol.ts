@@ -144,6 +144,7 @@ async function proxyRequest(
   request: Request,
   targetOrigin: URL,
   contentSecurityPolicy: string,
+  runFetch: ProtocolFetchLimiter,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
   if (requestUrl.host !== DESKTOP_HOST) {
@@ -180,12 +181,34 @@ async function proxyRequest(
   }
   const response =
     request.method === "GET" || request.method === "HEAD"
-      ? await fetchWithTransientRetry(targetUrl.toString(), init)
+      ? await runFetch(() => fetchWithTransientRetry(targetUrl.toString(), init))
       : await Electron.net.fetch(targetUrl.toString(), init);
   return withContentSecurityPolicy(response, contentSecurityPolicy);
 }
 
 const TRANSIENT_FETCH_RETRY_DELAYS_MS = [0, 50, 150] as const;
+const MAX_CONCURRENT_PROTOCOL_FETCHES = 32;
+
+type ProtocolFetchLimiter = <A>(fetch: () => Promise<A>) => Promise<A>;
+
+function makeProtocolFetchLimiter(maxConcurrent: number): ProtocolFetchLimiter {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+
+  return async <A>(fetch: () => Promise<A>): Promise<A> => {
+    if (active >= maxConcurrent) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+
+    active += 1;
+    try {
+      return await fetch();
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+}
 
 async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<Response> {
   let lastError: unknown;
@@ -207,6 +230,7 @@ async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<
 
 export const make = Effect.gen(function* () {
   const registered = yield* Ref.make(false);
+  const runFetch = makeProtocolFetchLimiter(MAX_CONCURRENT_PROTOCOL_FETCHES);
 
   const registerDesktopProtocol = Effect.fn("desktop.electron.protocol.registerDesktopProtocol")(
     function* (input: DesktopProtocolRegistrationInput) {
@@ -218,7 +242,7 @@ export const make = Effect.gen(function* () {
         Effect.try({
           try: () => {
             Electron.protocol.handle(input.scheme, (request) =>
-              proxyRequest(request, input.targetOrigin, contentSecurityPolicy),
+              proxyRequest(request, input.targetOrigin, contentSecurityPolicy, runFetch),
             );
           },
           catch: (cause) => new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),

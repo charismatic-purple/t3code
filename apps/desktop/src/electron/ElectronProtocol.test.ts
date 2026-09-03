@@ -141,6 +141,55 @@ describe("ElectronProtocol", () => {
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
+  it.effect("bounds concurrent renderer proxy fetches", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      const pendingFetches: Array<() => void> = [];
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock.mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            pendingFetches.push(() => resolve(new Response("ok")));
+          }),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code-dev",
+            targetOrigin: new URL("http://127.0.0.1:5733/"),
+            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          assert.isDefined(handler);
+
+          const requests = Array.from({ length: 40 }, (_, index) =>
+            handler!(new Request(`t3code-dev://app/module-${String(index)}.js`)),
+          );
+          while (netFetchMock.mock.calls.length < 32) {
+            yield* Effect.yieldNow;
+          }
+          assert.equal(netFetchMock.mock.calls.length, 32);
+
+          pendingFetches.shift()?.();
+          while (netFetchMock.mock.calls.length < 33) {
+            yield* Effect.yieldNow;
+          }
+          assert.equal(netFetchMock.mock.calls.length, 33);
+
+          netFetchMock.mockImplementation(async () => new Response("ok"));
+          for (const resolve of pendingFetches.splice(0)) {
+            resolve();
+          }
+          yield* Effect.promise(() => Promise.all(requests));
+        }),
+      );
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
+  );
+
   it.effect("preserves protocol registration failures", () =>
     Effect.gen(function* () {
       const cause = new Error("protocol registration failed");
